@@ -1,0 +1,231 @@
+--------------------------------------------------
+-- SERVICES
+--------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+--------------------------------------------------
+-- SETTINGS
+--------------------------------------------------
+local AimOn = false
+local POVOn = false
+local ESPOn = false
+local AimHead = true
+local AimSmooth = 0.15
+local POVRadius = 120
+local NPCs = {}
+
+--------------------------------------------------
+-- POV CIRCLE
+--------------------------------------------------
+local circle = Drawing.new("Circle")
+circle.Visible = false
+circle.Radius = POVRadius
+circle.Color = Color3.fromRGB(0,255,0)
+circle.Thickness = 2
+circle.Filled = false
+
+RunService.RenderStepped:Connect(function()
+	circle.Position = Vector2.new(
+		camera.ViewportSize.X/2,
+		camera.ViewportSize.Y/2
+	)
+end)
+
+--------------------------------------------------
+-- POV CHECK
+--------------------------------------------------
+local function InPOV(part)
+	if not part then return false end
+	local pos, onScreen = camera:WorldToViewportPoint(part.Position)
+	if not onScreen then return false end
+	local cx, cy = camera.ViewportSize.X/2, camera.ViewportSize.Y/2
+	local dx, dy = pos.X - cx, pos.Y - cy
+	return (dx*dx + dy*dy) <= POVRadius*POVRadius
+end
+
+--------------------------------------------------
+-- UPDATE NPC (ANTI LAG)
+--------------------------------------------------
+task.spawn(function()
+	while true do
+		task.wait(1)
+		NPCs = {}
+		for _, hum in ipairs(workspace:GetDescendants()) do
+			if hum:IsA("Humanoid") and hum.Health > 0 then
+				local model = hum.Parent
+				if model
+				and model:FindFirstChild("HumanoidRootPart")
+				and not Players:GetPlayerFromCharacter(model) then
+					table.insert(NPCs, model)
+				end
+			end
+		end
+	end
+end)
+
+--------------------------------------------------
+-- FIND TARGET
+--------------------------------------------------
+local function GetTarget()
+	local best, dist = nil, math.huge
+	for _, m in ipairs(NPCs) do
+		local part = AimHead and m:FindFirstChild("Head") or m:FindFirstChild("HumanoidRootPart")
+		if part and InPOV(part) then
+			local d = (camera.CFrame.Position - part.Position).Magnitude
+			if d < dist then
+				dist = d
+				best = part
+			end
+		end
+	end
+	return best
+end
+
+--------------------------------------------------
+-- AIM LOOP
+--------------------------------------------------
+RunService.RenderStepped:Connect(function()
+	if not AimOn or not POVOn then return end
+	local part = GetTarget()
+	if not part then return end
+
+	camera.CFrame = camera.CFrame:Lerp(
+		CFrame.new(camera.CFrame.Position, part.Position),
+		AimSmooth
+	)
+end)
+
+--------------------------------------------------
+-- ESP
+--------------------------------------------------
+local espFolder = Instance.new("Folder", workspace)
+espFolder.Name = "NPC_ESP"
+
+task.spawn(function()
+	while true do
+		task.wait(1.5)
+		espFolder:ClearAllChildren()
+		if ESPOn then
+			for _, m in ipairs(NPCs) do
+				local hl = Instance.new("Highlight")
+				hl.Adornee = m
+				hl.FillTransparency = 1
+				hl.OutlineColor = Color3.fromRGB(0,255,0)
+				hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				hl.Parent = espFolder
+			end
+		end
+	end
+end)
+
+--------------------------------------------------
+-- GUI
+--------------------------------------------------
+local gui = Instance.new("ScreenGui", player.PlayerGui)
+gui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0,260,0,300)
+frame.Position = UDim2.new(0,15,0.5,-150)
+frame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+frame.BorderSizePixel = 0
+
+local fullSize = frame.Size
+local collapsed = false
+
+--------------------------------------------------
+-- COLLAPSE BUTTON (+ / -)
+--------------------------------------------------
+local collapse = Instance.new("TextButton", frame)
+collapse.Size = UDim2.new(0,35,0,35)
+collapse.Position = UDim2.new(1,-35,0,0)
+collapse.Text = "−"
+collapse.BackgroundColor3 = Color3.fromRGB(70,70,70)
+collapse.TextColor3 = Color3.new(1,1,1)
+collapse.BorderSizePixel = 0
+
+--------------------------------------------------
+-- SCROLLING FRAME
+--------------------------------------------------
+local scroll = Instance.new("ScrollingFrame", frame)
+scroll.Position = UDim2.new(0,0,0,0)
+scroll.Size = UDim2.new(1,0,1,0)
+scroll.CanvasSize = UDim2.new(0,0,0,420)
+scroll.ScrollBarThickness = 6
+scroll.ScrollBarImageTransparency = 0.2
+scroll.BackgroundTransparency = 1
+
+--------------------------------------------------
+-- COLLAPSE ACTION
+--------------------------------------------------
+collapse.MouseButton1Click:Connect(function()
+	collapsed = not collapsed
+	scroll.Visible = not collapsed
+	frame.Size = collapsed
+		and UDim2.new(fullSize.X.Scale,fullSize.X.Offset,0,35)
+		or fullSize
+	collapse.Text = collapsed and "+" or "−"
+end)
+
+--------------------------------------------------
+-- BUTTON HELPER
+--------------------------------------------------
+local y = 10
+local function Button(text, callback)
+	local b = Instance.new("TextButton", scroll)
+	b.Size = UDim2.new(0.85,0,0,35)
+	b.Position = UDim2.new(0.075,0,0,y)
+	b.Text = text
+	b.BackgroundColor3 = Color3.fromRGB(60,60,60)
+	b.TextColor3 = Color3.new(1,1,1)
+	b.BorderSizePixel = 0
+	b.MouseButton1Click:Connect(function()
+		callback(b)
+	end)
+	y = y + 40
+end
+
+--------------------------------------------------
+-- MENU BUTTONS
+--------------------------------------------------
+Button("AIM : OFF",function(b)
+	AimOn = not AimOn
+	b.Text = AimOn and "AIM : ON" or "AIM : OFF"
+end)
+
+Button("POV : OFF",function(b)
+	POVOn = not POVOn
+	circle.Visible = POVOn
+	b.Text = POVOn and "POV : ON" or "POV : OFF"
+end)
+
+Button("ESP : OFF",function(b)
+	ESPOn = not ESPOn
+	b.Text = ESPOn and "ESP : ON" or "ESP : OFF"
+end)
+
+Button("AIM PART : HEAD",function(b)
+	AimHead = not AimHead
+	b.Text = AimHead and "AIM PART : HEAD" or "AIM PART : BODY"
+end)
+
+Button("AIM SMOOTH +",function()
+	AimSmooth = math.clamp(AimSmooth + 0.02,0.05,0.4)
+end)
+
+Button("AIM SMOOTH -",function()
+	AimSmooth = math.clamp(AimSmooth - 0.02,0.05,0.4)
+end)
+
+Button("POV +",function()
+	POVRadius = math.clamp(POVRadius + 10,70,220)
+	circle.Radius = POVRadius
+end)
+
+Button("POV -",function()
+	POVRadius = math.clamp(POVRadius - 10,70,220)
+	circle.Radius = POVRadius
+end)
