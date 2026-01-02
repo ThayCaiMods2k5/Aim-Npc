@@ -1,0 +1,2 @@
+# Aim-Npc
+Script
